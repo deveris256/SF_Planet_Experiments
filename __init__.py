@@ -6,7 +6,7 @@ from bpy.props import StringProperty, CollectionProperty, IntProperty
 bl_info = {
     "name": "Starfield Planet Experiments",
     "author": "Deveris256 (biom scripts by PixelRick, adjusted)",
-    "version": (0, 0, 1),
+    "version": (0, 1, 0),
     "blender": (4, 0, 0),
     "location": "3D",
     "description": "Starfield Planet Experiments",
@@ -24,11 +24,13 @@ if dir not in sys.path:
 	sys.path.append(dir)
 
 import biom
+import palette
 
 # Reloads on F8 hotkey press
 if "bpy" in locals():
     import imp
     imp.reload(biom)
+    imp.reload(palette)
 
 """
 Classes
@@ -210,8 +212,8 @@ def saveBiom(planet, save_path):
     planet_name = planet.data.materials[0]["planet_name"]
     biomes = planet.data.materials[0].biome_data
 
-    biom_img = Image.open(os.path.join(utils_folder, f"{planet_name}_biomes.png")).convert('L')
-    res_img = Image.open(os.path.join(utils_folder, f"{planet_name}_resources.png")).convert('L')
+    biom_img = Image.open(os.path.join(utils_folder, f"{planet_name}_biomes.png")).convert('RGB')
+    res_img = Image.open(os.path.join(utils_folder, f"{planet_name}_resources.png")).convert('RGB')
 
     biom_file = biom.BiomFile()
 
@@ -232,7 +234,7 @@ def loadPlanet(planet_file):
 
     biom_file.texture()
     biome_img = biom_file.biome_idx_img
-    resource_img = biom_file.res_idx_grid
+    resource_img = biom_file.res_idx_img
 
     biome_img.save(os.path.join(utils_folder, f"{planet_name}_biomes.png"))
     resource_img.save(os.path.join(utils_folder, f"{planet_name}_resources.png"))

@@ -3,7 +3,14 @@ from construct import Struct, Const, Rebuild, this, len_
 from construct import Int32ul as UInt32, Int16ul as UInt16, Int8ul as UInt8
 import csv
 import numpy as np
+import sys
+import os
 from PIL import Image
+
+dir = os.path.dirname(os.path.realpath(__file__))
+if dir not in sys.path:
+	sys.path.append(dir)
+import palette
 
 GRID_SIZE = [0x100, 0x100]
 GRID_FLATSIZE = GRID_SIZE[0] * GRID_SIZE[1]
@@ -99,15 +106,16 @@ class BiomFile(object):
 
         res_array = np.asarray(self.res_img)
 
+        
+        empty_array = np.zeros((512,256,1))
         res_array = np.select(
-            [res_array == idx for idx in r2i.keys()],
+            [res_array == palette.palettedata_lists[idx] for idx in r2i.keys()],
             [res_id for res_id in r2i.values()],
-            res_array
+            empty_array
         )
-        print(res_array.shape)
-
+        res_array = res_array[:, :, 0:1]
+        res_array = res_array.astype(int)
         res_array = np.hsplit(res_array.ravel(), (65536,))
-        print(res_array[0].shape, res_array[1].shape)
 
         self.resrcGridN = np.rot90(np.reshape(res_array[1], GRID_SIZE), axes=(1,0)).ravel()
         self.resrcGridS = np.rot90(np.reshape(res_array[0], GRID_SIZE), axes=(1,0)).ravel()
@@ -115,11 +123,12 @@ class BiomFile(object):
         biom_array = np.asarray(self.biom_img)
 
         biom_array = np.select(
-            [biom_array == idx for idx in b2i.keys()],
+            [biom_array == palette.palettedata_lists[idx] for idx in b2i.keys()],
             [biom_id for _, biom_id in b2i.items()],
-            biom_array
+            empty_array
         )
-
+        biom_array = biom_array[:, :, 0:1]
+        biom_array = biom_array.astype(int)
         biom_array = np.hsplit(biom_array.ravel(), (65536,))
 
         self.biomeGridN = np.rot90(np.reshape(biom_array[1], GRID_SIZE), axes=(1,0)).ravel()
@@ -146,6 +155,13 @@ class BiomFile(object):
 
         combinedGrid = (resIdxGrid + 1) * len(b2i) + biomeIdxGrid * 2
 
-        self.combined_img = Image.fromarray(np.rot90(combinedGrid)).convert('RGB')
-        self.biome_idx_img = Image.fromarray(np.uint8(np.rot90(biomeIdxGrid))).convert('RGB')
-        self.res_idx_grid = Image.fromarray(np.uint8(np.rot90(resIdxGrid))).convert('RGB')
+        biome_idx_img = Image.fromarray(np.uint8(np.rot90(biomeIdxGrid))).convert('LA')
+        biome_idx_img.putpalette(palette.palettedata)
+
+        res_idx_img = Image.fromarray(np.uint8(np.rot90(resIdxGrid))).convert('LA')
+        res_idx_img.putpalette(palette.palettedata)
+
+        self.biome_idx_img = biome_idx_img.convert('RGB')
+        self.res_idx_img = res_idx_img.convert('RGB')
+        print("BIOME COLORS", biome_idx_img.getcolors())
+        print("RES COLORS", self.res_idx_img.getcolors())
