@@ -8,7 +8,7 @@ from bpy.props import StringProperty, CollectionProperty, IntProperty
 bl_info = {
     "name": "Starfield Planet Experiments",
     "author": "Deveris256 (biom scripts by PixelRick, adjusted)",
-    "version": (0, 1, 0),
+    "version": (0, 1, 1),
     "blender": (4, 0, 0),
     "location": "3D",
     "description": "Starfield Planet Experiments",
@@ -50,6 +50,8 @@ class SF_UL_BiomeData(bpy.types.UIList):
         layout.label(text=item.name)
         layout.scale_x = 0.6
         layout.label(text=str(item.biome_id))
+        layout.scale_x = 0.35
+        layout.operator("sf_planets.select_biome_color").index = index
 
 class PlanetBiome(bpy.types.PropertyGroup):
     name: StringProperty(name="Name", default="NAME UNKNOWN")
@@ -94,21 +96,135 @@ class SF_PT_Planets(bpy.types.Panel):
 
             box.operator("sf_planets.set_biome_id")
 
-            row = layout.row()
-            row.operator("sf_planets.gen_layer_images")
+            box = layout.box()
+            col = box.column()
+            col.operator("sf_planets.gen_layer_images")
+            col.operator("sf_planets.enter_texture_paint")
+
+            row = box.row()
+            row.operator("sf_planets.select_biome_image")
+            row.operator("sf_planets.select_resource_image")
+            box.operator("sf_planets.save_edited_images")
 
             layout.separator()
-    
+
             layout.operator("sf_planet.save_biom_file")
 
 """
 Operators
 """
 
+class SelectBiomeColor(bpy.types.Operator):
+    bl_idname = "sf_planets.select_biome_color"
+    bl_label = "Col"
+    bl_description = "Select biome color and enter texture painting mode"
+    bl_options = {'UNDO'}
+
+    index: IntProperty()
+
+    def execute(self, context):
+        obj = bpy.data.objects["planet_sphere_unit:0"]
+
+        if not isPlanetValid(obj):
+            self.report("Invalid planet: addon looks for planet_sphere_unit:0 with valid material")
+            return {'CANCELLED'}
+        
+        mat = obj.data.materials[0]
+
+        #palette_slice = palette.palettedata_lists[:len(mat.biome_data)]
+        #palette_slice.reverse()
+        col = tuple(c / 255 for c in palette.palettedata_lists[self.index])
+
+        bpy.ops.object.mode_set(mode='TEXTURE_PAINT')
+        brush = bpy.context.tool_settings.image_paint.brush
+        bpy.context.scene.tool_settings.image_paint.use_normal_falloff
+        brush.color = col
+
+        return {'FINISHED'}
+
+class MakeBrushCorrect(bpy.types.Operator):
+    bl_idname = "sf_planets.enter_texture_paint"
+    bl_label = "Set-up and enter texture paint"
+    bl_description = "Applies correct settings to the active brush"
+    bl_options = {'UNDO'}
+
+    def execute(self, context):
+        area_set = False
+        for area in bpy.context.screen.areas:
+            if area.type == 'VIEW_3D':
+                for space in area.spaces:
+                    if space.type == 'VIEW_3D':
+                        space.shading.type = 'SOLID'
+                        area_set = True
+                        
+        if area_set == False:
+            self.report({'ERROR'}, "Can't find viewport")
+            return {'CANCELLED'}
+        
+        bpy.ops.object.mode_set(mode='TEXTURE_PAINT')
+        brush = bpy.context.tool_settings.image_paint.brush
+        brush.curve_preset = 'CONSTANT'
+
+        return {'FINISHED'}
+
+class SelectBiomeImage(bpy.types.Operator):
+    bl_idname = "sf_planets.select_biome_image"
+    bl_label = "View biomes"
+    bl_description = "Selects biome map"
+    bl_options = {'UNDO'}
+
+    def execute(self, context):
+        obj = bpy.data.objects["planet_sphere_unit:0"]
+        
+        if not isPlanetValid(obj):
+            self.report("Invalid planet: addon looks for planet_sphere_unit:0 with valid material")
+            return {'CANCELLED'}
+        
+        mat = obj.data.materials[0]
+        img_node = mat.node_tree.nodes.get("biomes")
+
+        if img_node == None:
+            self.report({'ERROR'}, "Can't find biome image node")
+            return {'CANCELLED'}
+
+        mat.node_tree.nodes.active = img_node
+        
+        idx = mat.texture_paint_slots.find(img_node.image.name)
+        mat.paint_active_slot = idx
+        
+        return {'FINISHED'}
+
+class SelectResourceImage(bpy.types.Operator):
+    bl_idname = "sf_planets.select_resource_image"
+    bl_label = "View resources"
+    bl_description = "Selects resource map"
+    bl_options = {'UNDO'}
+
+    def execute(self, context):
+        obj = bpy.data.objects["planet_sphere_unit:0"]
+        
+        if not isPlanetValid(obj):
+            self.report("Invalid planet: addon looks for planet_sphere_unit:0 with valid material")
+            return {'CANCELLED'}
+        
+        mat = obj.data.materials[0]
+        img_node = mat.node_tree.nodes.get("resources")
+
+        if img_node == None:
+            self.report({'ERROR'}, "Can't find resources image node")
+            return {'CANCELLED'}
+
+        mat.node_tree.nodes.active = img_node
+
+        idx = mat.texture_paint_slots.find(img_node.image.name)
+        mat.paint_active_slot = idx
+        
+        return {'FINISHED'}
+
 class GenLayerImages(bpy.types.Operator):
     bl_idname = "sf_planets.gen_layer_images"
     bl_label = "Gen layers (for texture artists)"
-    bl_description = "Separate image layers to textures (Might help you with custom texture drawing!)."
+    bl_description = "Separate image layers to textures (Might help you with custom texture drawing!). Please save edited images first."
     bl_options = {'UNDO'}
 
     old_id: IntProperty(default=0)
@@ -131,11 +247,35 @@ class OpenImagesFolder(bpy.types.Operator):
     bl_description = "Open folder with all planet textures"
     bl_options = {'UNDO'}
 
-    old_id: IntProperty(default=0)
-    new_id: StringProperty(default="")
-
     def execute(self, context):
         os.startfile(utils_folder)
+        return {'FINISHED'}
+
+class SaveEditedImages(bpy.types.Operator):
+    bl_idname = "sf_planets.save_edited_images"
+    bl_label = "Save edited images"
+    bl_description = "Saves edited biome and resource images to disk"
+    bl_options = {'UNDO'}
+
+    def execute(self, context):
+        obj = bpy.data.objects["planet_sphere_unit:0"]
+
+        if not isPlanetValid(obj):
+            self.report("Invalid planet: addon looks for planet_sphere_unit:0 with valid material")
+            return {'CANCELLED'}
+
+        mat = obj.data.materials[0]
+
+        biom_node = mat.node_tree.nodes.get("biomes")
+        res_node = mat.node_tree.nodes.get("biomes")
+
+        if biom_node == None or res_node == None:
+            self.report({'ERROR'}, "Can't find biome or resource image node in material!")
+            return {'CANCELLED'}
+        
+        res_node.image.save()
+        biom_node.image.save()
+        self.report({'INFO'}, f"Images saved for {mat['planet_name']}")
         return {'FINISHED'}
 
 class SetBiomeID(bpy.types.Operator):
@@ -202,8 +342,8 @@ class LoadBiomFile(bpy.types.Operator):
 
 class SaveBiomFile(bpy.types.Operator):
     bl_idname = "sf_planet.save_biom_file"
-    bl_label = "Save .biom file"
-    bl_description = "Save .biom file to disk"
+    bl_label = "Save .biom file and images"
+    bl_description = "Save .biom file to disk. Will also save modified planet images to disk."
     filename: bpy.props.StringProperty(default='')
     directory: bpy.props.StringProperty(subtype="DIR_PATH")
 
@@ -211,6 +351,17 @@ class SaveBiomFile(bpy.types.Operator):
 
     def execute(self, event):        
         obj = bpy.data.objects["planet_sphere_unit:0"]
+        mat = obj.data.materials[0]
+
+        biom_node = mat.node_tree.nodes.get("biomes")
+        res_node = mat.node_tree.nodes.get("biomes")
+
+        if biom_node == None or res_node == None:
+            self.report({'ERROR'}, "Can't find biome or resource image node in material!")
+            return {'CANCELLED'}
+        
+        res_node.image.save()
+        biom_node.image.save()
 
         if not self.filename.endswith(".biom"):
             self.filename = f"{self.filename}.biom"
@@ -330,7 +481,9 @@ def createPlanetMaterial(obj, planet, planet_name):
     biom_tex_node.interpolation = "Closest"
     principled_BSDF = planet_mat.node_tree.nodes.get('Principled BSDF')
     principled_BSDF.inputs[2].default_value = 1.0
-    planet_mat.node_tree.links.new(res_tex_node.outputs[0], principled_BSDF.inputs[0])
+    planet_mat.node_tree.links.new(biom_tex_node.outputs[0], principled_BSDF.inputs[0])
+
+    planet_mat.node_tree.nodes.active = biom_tex_node
 
 def genLayerImages(planet_name):
     biom_img = Image.open(os.path.join(utils_folder, f"{planet_name}_biomes.png")).convert('RGB')
@@ -382,6 +535,11 @@ classes = [
     LoadBiomFile,
     OpenImagesFolder,
     GenLayerImages,
+    SelectBiomeColor,
+    MakeBrushCorrect,
+    SelectBiomeImage,
+    SelectResourceImage,
+    SaveEditedImages,
     SF_UL_BiomeData,
     SF_PT_Planets,
 ]
