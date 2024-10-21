@@ -1,5 +1,7 @@
 import bpy, os, sys
 from PIL import Image
+from PIL import ImageFilter
+import numpy as np
 
 from bpy.props import StringProperty, CollectionProperty, IntProperty
 
@@ -15,9 +17,13 @@ bl_info = {
 
 addon_folder = os.path.dirname(os.path.abspath(__file__))
 utils_folder = os.path.join(addon_folder, "utils")
+layers_folder = os.path.join(addon_folder, "layers")
 
 if not os.path.isdir(utils_folder):
     os.makedirs(utils_folder)
+
+if not os.path.isdir(layers_folder):
+    os.makedirs(layers_folder)
 
 dir = os.path.dirname(os.path.realpath(__file__))
 if dir not in sys.path:
@@ -63,14 +69,14 @@ class SF_PT_Planets(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        active = bpy.context.view_layer.objects.active
+        obj = bpy.data.objects.get("planet_sphere_unit:0")
 
         layout.operator("sf_planet.load_biom_file")
 
         mat = []
 
-        if active != None and len(active.data.materials) >= 1 and active.data.materials[0] != None:
-            mat = active.data.materials[0]
+        if obj != None and len(obj.data.materials) >= 1 and obj.data.materials[0] != None:
+            mat = obj.data.materials[0]
 
         if "planet_name" in mat:
             layout.label(text=f"Editing {mat['planet_name']}")
@@ -88,13 +94,36 @@ class SF_PT_Planets(bpy.types.Panel):
 
             box.operator("sf_planets.set_biome_id")
 
-        layout.separator()
+            row = layout.row()
+            row.operator("sf_planets.gen_layer_images")
 
-        layout.operator("sf_planet.save_biom_file")
+            layout.separator()
+    
+            layout.operator("sf_planet.save_biom_file")
 
 """
 Operators
 """
+
+class GenLayerImages(bpy.types.Operator):
+    bl_idname = "sf_planets.gen_layer_images"
+    bl_label = "Gen layers (for texture artists)"
+    bl_description = "Separate image layers to textures (Might help you with custom texture drawing!)."
+    bl_options = {'UNDO'}
+
+    old_id: IntProperty(default=0)
+    new_id: StringProperty(default="")
+
+    def execute(self, context):
+        obj = bpy.data.objects["planet_sphere_unit:0"]
+        
+        if not isPlanetValid(obj):
+            self.report("Invalid planet: addon looks for planet_sphere_unit:0 with valid material")
+            return {'CANCELLED'}
+        
+        planet_name = obj.data.materials[0]["planet_name"]
+        genLayerImages(planet_name)
+        return {'FINISHED'}
 
 class OpenImagesFolder(bpy.types.Operator):
     bl_idname = "sf_planets.open_images_folder"
@@ -192,9 +221,8 @@ class SaveBiomFile(bpy.types.Operator):
     
     def invoke(self, context, event):
         obj = bpy.data.objects["planet_sphere_unit:0"]
-        planet_valid = obj != None and len(obj.data.materials) >= 1 and obj.data.materials[0] != None and "planet_name" in obj.data.materials[0]
         
-        if not planet_valid:
+        if not isPlanetValid(obj):
             self.report("Invalid planet: addon looks for planet_sphere_unit:0 with valid material")
             return {'CANCELLED'}
         
@@ -206,6 +234,9 @@ class SaveBiomFile(bpy.types.Operator):
 """
 Functions
 """
+
+def isPlanetValid(obj):
+    return obj != None and len(obj.data.materials) >= 1 and obj.data.materials[0] != None and "planet_name" in obj.data.materials[0]
 
 def saveBiom(planet, save_path):
 
@@ -301,6 +332,44 @@ def createPlanetMaterial(obj, planet, planet_name):
     principled_BSDF.inputs[2].default_value = 1.0
     planet_mat.node_tree.links.new(res_tex_node.outputs[0], principled_BSDF.inputs[0])
 
+def genLayerImages(planet_name):
+    biom_img = Image.open(os.path.join(utils_folder, f"{planet_name}_biomes.png")).convert('RGB')
+    res_img = Image.open(os.path.join(utils_folder, f"{planet_name}_resources.png")).convert('RGB')
+
+    for idx, img in enumerate([biom_img, res_img]):
+
+        img_array = np.asarray(img)
+        unique = np.unique(img_array.reshape(-1, img_array.shape[2]), axis=0)
+
+        if idx == 0:
+            suffix = "biomes"
+        else:
+            suffix = "resources"
+
+        for col_idx, unique_color in enumerate(unique):
+            sel_img_array = np.copy(img_array)
+
+            sel_img_array[sel_img_array == unique_color] = 255
+            sel_img_array[sel_img_array != 255] = 0
+
+            unique_img = Image.fromarray(sel_img_array)
+            unique_img = unique_img.resize((1024, 2048))
+            unique_img = unique_img.filter(ImageFilter.GaussianBlur(radius=2.75))
+            unique_img = unique_img.filter(ImageFilter.SMOOTH_MORE)
+            unique_img = unique_img.filter(ImageFilter.SMOOTH_MORE)
+            unique_img = unique_img.filter(ImageFilter.EDGE_ENHANCE_MORE)
+            unique_img = unique_img.filter(ImageFilter.EDGE_ENHANCE)
+
+            unique_img.save(
+                os.path.join(layers_folder, f"{planet_name}_{suffix}_layer{col_idx}.png")
+            )
+
+            unique_img = unique_img.filter(ImageFilter.FIND_EDGES)
+            unique_img = unique_img.filter(ImageFilter.SMOOTH_MORE)
+            unique_img.save(
+                os.path.join(layers_folder, f"{planet_name}_{suffix}_layer{col_idx}_EDGE.png")
+            )
+
 """
 Register
 """
@@ -312,6 +381,7 @@ classes = [
     StarfieldPlanet,
     LoadBiomFile,
     OpenImagesFolder,
+    GenLayerImages,
     SF_UL_BiomeData,
     SF_PT_Planets,
 ]
