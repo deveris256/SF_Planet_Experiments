@@ -1,14 +1,38 @@
 import bpy, os, sys
-from PIL import Image
-from PIL import ImageFilter
+
+def checkSubmodules():
+    pillow_missing = False
+    construct_missing = False
+
+    try:
+        import PIL
+    except ModuleNotFoundError:
+        pillow_missing = True
+    
+    try:
+        import construct
+    except ModuleNotFoundError:
+        construct_missing = True
+    
+    return pillow_missing, construct_missing
+
+install_required = False
+
+if any(checkSubmodules()):
+    install_required = True
+else:
+    from PIL import Image
+    from PIL import ImageFilter
+
 import numpy as np
 
+from bpy.types import AddonPreferences
 from bpy.props import StringProperty, CollectionProperty, IntProperty
 
 bl_info = {
     "name": "Starfield Planet Experiments",
     "author": "Deveris256 (biom scripts by PixelRick, adjusted)",
-    "version": (0, 1, 1),
+    "version": (0, 1, 2),
     "blender": (4, 0, 0),
     "location": "3D",
     "description": "Starfield Planet Experiments",
@@ -29,18 +53,40 @@ dir = os.path.dirname(os.path.realpath(__file__))
 if dir not in sys.path:
 	sys.path.append(dir)
 
-import biom
+if not install_required:
+    import biom
+
 import palette
 
 # Reloads on F8 hotkey press
 if "bpy" in locals():
     import imp
-    imp.reload(biom)
+    if not install_required:
+        imp.reload(biom)
     imp.reload(palette)
 
 """
 Classes
 """
+
+class SFPlanetsPreferences(AddonPreferences):
+    bl_idname = __name__
+
+    missing: StringProperty(
+        name="Missing submodules",
+        default=""
+    )
+    
+    def draw(self, context):
+        layout = self.layout
+        missing = checkSubmodules()
+
+        if any(missing):
+            box = layout.box()
+            box.alert = True
+            box.label(text="Please install missing submodules for addon to function correctly!")
+            layout.operator("sf_planets.install_missing_submodules")
+
 
 class SF_UL_BiomeData(bpy.types.UIList):
     bl_idname = "SF_UL_BiomeData"
@@ -71,6 +117,15 @@ class SF_PT_Planets(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
+
+        if install_required:
+            box = layout.box()
+            box.alert = True
+            box.label(text="MISSING SUBMODULES")
+            box.label(text="Install missing in the")
+            box.label(text="Blender preferences!")
+            return
+
         obj = bpy.data.objects.get("planet_sphere_unit:0")
 
         layout.operator("sf_planet.load_biom_file")
@@ -113,6 +168,16 @@ class SF_PT_Planets(bpy.types.Panel):
 """
 Operators
 """
+
+
+class InstallMissingSubmodules(bpy.types.Operator):
+    bl_idname = "sf_planets.install_missing_submodules"
+    bl_label = "Install missing submodules (Freezes for some time, it's normal)"
+    bl_description = "Installs missing submodules"
+
+    def execute(self, context):
+        installModules()
+        return {'FINISHED'}
 
 class SelectBiomeColor(bpy.types.Operator):
     bl_idname = "sf_planets.select_biome_color"
@@ -527,7 +592,25 @@ def genLayerImages(planet_name):
 Register
 """
 
+def installModules():
+    import subprocess
+    global install_required
+    
+    try:
+        import PIL
+    except ModuleNotFoundError:
+        subprocess.run([sys.executable, "-m", "pip", "install", "Pillow"])
+    
+    try:
+        import construct
+    except ModuleNotFoundError:
+        subprocess.run([sys.executable, "-m", "pip", "install", "construct"])
+
+    install_required = False
+
 classes = [
+    SFPlanetsPreferences,
+    InstallMissingSubmodules,
     SetBiomeID,
     SaveBiomFile,
     PlanetBiome,
